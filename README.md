@@ -1,9 +1,4 @@
 # Web-Application-Security
-# Comprehensive Technical Breakdown: Web Application Security Assessment in Cybersecurity Projects
-
-In modern software security, **Web Application Security Assessment** serves as the vital offensive auditing and defensive patching framework within a complete cybersecurity curriculum[1][2]. While complementary projects establish baseline authentication controls or build hardened REST APIs, the security assessment domain bridges dynamic penetration testing with source code remediation[1].
-
----
 
 ## 1\. Web Application Security Assessment in the Context of Cybersecurity Projects
 
@@ -126,8 +121,77 @@ def secure_add_review():
 
 ---
 
-### Module 3: Broken Object Level Authorization (BOLA / IDOR) Defense Logic
+## Impact Analysis: What Changes if Small Code Alterations Are Made?
+
+Security controls are binary; minor modifications to secure code blocks immediately re-introduce high-severity security vulnerabilities[17].
 
 ```
-# SECURE PATTERN: Explicit Resource-Level Ownership Check
-@app.route('/api/orders/
+┌───────────────────────────────────────┬───────────────────────────────────────┐
+│ Code Modification                     │ Resulting Security Impact             │
+├───────────────────────────────────────┼───────────────────────────────────────┤
+│ Replace parameter binding (?) with    │ Restores Authentication Bypass        │
+│ Python f-strings / string formatting  │ SQL Injection (SQLi) [17, 19].        │
+├───────────────────────────────────────┼───────────────────────────────────────┤
+│ Omit `html.escape()` or render via    │ Re-introduces Stored Cross-Site       │
+│ unescaped dynamic HTML templates      │ Scripting (XSS) [18, 19].             │
+├───────────────────────────────────────┼───────────────────────────────────────┤
+│ Remove `AND user_id = ?` from SQL or  │ Opens Broken Object Level             │
+│ skip ownership validation checks      │ Authorization (BOLA/IDOR) [20, 29].   │
+├───────────────────────────────────────┼───────────────────────────────────────┤
+│ Switch password hashing from Argon2id │ Enables rapid GPU-based offline       │
+│ or bcrypt to standard MD5 / SHA-256   │ dictionary attacks [6, 30].         │
+├───────────────────────────────────────┼───────────────────────────────────────┤
+│ Store JWT tokens in `localStorage`   │ Exposes session tokens to instant XSS │
+│ instead of `HttpOnly` cookies         │ exfiltration [31, 32].               │
+└───────────────────────────────────────┴───────────────────────────────────────┘
+
+```
+
+### 1\. SQL Injection Modification
+
+* **Code Alteration**: Changing `cursor.execute("SELECT ... WHERE username = ? AND password_hash = ?", (username, password))` to string formatting:
+
+```
+# DANGEROUS MODIFICATION: Re-introducing string concatenation
+query = f"SELECT id, username, role FROM users WHERE username = '{username}' AND password_hash = '{password}'"
+cursor.execute(query)
+
+```
+
+* **Resulting Failure**: An attacker submits the username payload: `' OR '1'='1' --`. The resulting query compiled by the database becomes:
+
+```
+SELECT id, username, role FROM users WHERE username = '' OR '1'='1' --' AND password_hash = '...'
+
+```
+
+Because `'1'='1'` evaluates to `TRUE` and `--` comments out the password check, the database returns the first record (typically the `admin` user), allowing complete **Authentication Bypass without a password**[17][23].
+
+---
+
+### 2\. Stored XSS Modification
+
+* **Code Alteration**: Removing the `html.escape()` wrapper prior to database insertion:
+
+```
+# DANGEROUS MODIFICATION: Storing raw user input
+cursor.execute("INSERT INTO reviews (user_id, review_text) VALUES (?, ?)", (user_id, raw_review))
+
+```
+
+* **Resulting Failure**: An attacker posts a review containing an exfiltration payload:
+
+```
+
+```
+
+The raw payload is stored in the `reviews` table[12][18]. Whenever any user or administrator views the reviews dashboard, their browser executes the script in their session context, **exfiltrating session cookies and compromising their account**
+
+### . Credential &amp; Session Storage Modifications
+
+* **Password Hashing Alteration**: Switching from `Argon2id` / `bcrypt` to `SHA-256`:
+  * *Impact*: SHA-256 computes in nanoseconds. In an offline database breach, attackers using modern GPUs can compute **tens of billions of SHA-256 hashes per second**, cracking user passwords within hours[6][32]. `Argon2id` forces high memory utilization and CPU cost, choking GPU parallelization[6].
+* **Token Storage Alteration**: Storing JWTs in browser `localStorage` instead of `HttpOnly` cookies:
+  * *Impact*: `localStorage` is accessible to client-side JavaScript (`window.localStorage`)[30][31]. A single XSS vulnerability anywhere on the origin allows malicious scripts to extract and exfiltrate user session tokens instantly[30]. `HttpOnly` cookies instruct the browser engine to block client-side script access entirely
+
+
